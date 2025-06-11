@@ -1,0 +1,26 @@
+{
+  "name": "energy-ai-advisor",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "echo 'Use pnpm --filter <package> dev to run each package'",
+    "start:qdrant": "docker-compose -f infra/qdrant/docker-compose.yml up",
+    "start:backend": "pnpm --filter backend dev",
+    "start:agent": "pnpm --filter ai-agent dev",
+    "start:browser": "pnpm --filter mcp-server-browser dev",
+    "start:db": "pnpm --filter mcp-server-db dev"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.3",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.6.8",
+    "@qdrant/js-client-rest": "^1.14.1",
+    "@xenova/transformers": "^2.17.2",
+    "dotenv": "^16.5.0",
+    "node-fetch": "^3.3.2",
+    "uuid": "^11.1.0"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "mcp-server-browser",
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "ts-node index.ts"
+  },
+  "dependencies": {
+    "browserbase": "^1.0.0"
+  }
+}

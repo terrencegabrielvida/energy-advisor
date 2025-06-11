@@ -1,0 +1,13 @@
+{
+  "name": "ai-agent",
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "ts-node index.ts"
+  },
+  "dependencies": {
+    "@qdrant/js-client-rest": "^1.8.0",
+    "@anthropic-ai/sdk": "^0.6.0",
+    "@data-core/embedding": "workspace:*",
+    "dotenv": "^16.3.1"
+  }
+}

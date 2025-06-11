@@ -1,0 +1,10 @@
+{
+  "name": "@data-core/embedding",
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "echo 'No dev script needed for utility module'"
+  },
+  "dependencies": {
+    "@xenova/transformers": "^2.7.0"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "mcp-server-db",
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "ts-node index.ts"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.3"
+  }
+}
