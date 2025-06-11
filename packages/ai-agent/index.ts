@@ -9,7 +9,47 @@ const qdrant = new QdrantClient({
   url: process.env.QDRANT_URL!,
 });
 
-async function askClaude(question: string, context: string): Promise<string> {
+interface MCPSearchResult {
+  sources: {
+    websites: Array<{
+      title: string;
+      url: string;
+    }>;
+  };
+}
+
+async function searchMCP(question: string): Promise<MCPSearchResult> {
+  const response = await fetch("http://localhost:3000/analyze", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ question }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`MCP server error ${response.status}`);
+  }
+
+  const data = await response.json() as MCPSearchResult;
+  return data;
+}
+
+async function askClaude(question: string, context?: string): Promise<string> {
+  let finalContext = context;
+  
+  if (!finalContext) {
+    try {
+      const searchResults = await searchMCP(question);
+      finalContext = searchResults.sources.websites
+        .map((site: any) => `${site.title}\n${site.url}`)
+        .join('\n\n');
+    } catch (error) {
+      console.error('Error searching MCP:', error);
+      finalContext = "No additional context available.";
+    }
+  }
+
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -18,12 +58,63 @@ async function askClaude(question: string, context: string): Promise<string> {
       "content-type": "application/json",
     },
     body: JSON.stringify({
-      model: "claude-3-opus-20240229", // you can switch to claude-3-sonnet-20240229 if needed
+      model: "claude-3-opus-20240229",
       max_tokens: 1024,
       messages: [
         {
           role: "user",
-          content: `You are an energy advisor. Use the context below to answer the user’s question.\n\nContext:\n${context}\n\nQuestion:\n${question}`,
+          content: `You are an energy sector expert AI assistant specializing in the Philippine energy market. Your task is to provide specific, data-driven insights and recommendations based on the following question and available data.
+
+      Question: ${question}
+      
+      Context from websites and database:
+      ${finalContext}
+      
+      Please provide your response in a conversational, expert manner. Include:
+
+      1. Specific Recommendations
+         - Clear, actionable location or solution recommendations
+         - Exact metrics and numbers (e.g., "50 pesos per meter", "100MW demand")
+         - Specific timeframes for forecasts
+         - Concrete price points and ROI projections
+
+      2. Market Analysis
+         - Current supply and demand situation
+         - Specific price points and trends
+         - Recent developments and their exact impacts
+         - Historical data comparisons
+
+      3. Technical Assessment
+         - Specific infrastructure details
+         - Exact capacity numbers
+         - Technical requirements
+         - Grid connection specifics
+
+      4. Financial Analysis
+         - Precise cost estimates in Philippine Peso
+         - Specific ROI projections
+         - Breakeven timelines
+         - Available financial hedges or contracts
+
+      5. Risk Factors
+         - Specific challenges with exact numbers
+         - Market volatility metrics
+         - Regulatory considerations
+         - Environmental impact data
+
+      Important Guidelines:
+      - Be specific with numbers, dates, and locations
+      - Use exact Philippine Peso amounts
+      - Provide concrete timelines
+      - Include specific company names and projects
+      - Reference actual market prices and trends
+      - Use real historical data for comparisons
+      - Be conversational but professional
+      - Offer to provide more detailed information
+      - Include specific sources for key data points
+      - Focus on actionable insights
+
+      Format your response in a clear, conversational manner. If you have specific data points, present them with exact numbers. If you're making projections, include specific timelines and amounts.`,
         },
       ],
     }),
@@ -58,7 +149,6 @@ async function runAgent() {
 
   const answer = await askClaude(userInput, context);
   console.log("\n🔹 User Input:\n", userInput);
-
   console.log("\n🔹 Claude Response:\n", answer);
 }
 
