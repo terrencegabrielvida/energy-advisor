@@ -1,0 +1,17 @@
+{
+  "name": "@energy-advisor/monitoring",
+  "version": "1.0.0",
+  "description": "Phoenix monitoring for energy advisor AI agent",
+  "main": "index.js",
+  "scripts": {
+    "dev": "python -m phoenix.server.main serve",
+    "start": "python -m phoenix.server.main serve --port 6006"
+  },
+  "dependencies": {
+    "axios": "^1.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}

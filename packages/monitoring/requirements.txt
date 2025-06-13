@@ -1,0 +1,21 @@
+# Web server
+flask>=2.0.0
+flask-cors>=4.0.0
+
+# Phoenix monitoring (free, no API key required)
+arize-phoenix>=4.0.0
+
+# RAGAS evaluation (free with local models)
+ragas>=0.1.0
+
+# Local embeddings and LLMs (no API keys)
+sentence-transformers>=2.2.0
+transformers>=4.30.0
+torch>=2.0.0
+
+# Data handling
+pandas>=1.5.0
+datasets>=2.0.0
+
+# Optional: Ollama integration for local LLMs
+ollama>=0.1.0

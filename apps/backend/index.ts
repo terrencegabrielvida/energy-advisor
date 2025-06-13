@@ -5,6 +5,7 @@ config({ path: path.resolve(__dirname, '../../.env') });
 import express from 'express';
 import { createClient } from '@supabase/supabase-js';
 import { Request, Response } from 'express';
+import { AIAgentMonitor } from '../../packages/monitoring/monitoring';
 import 'dotenv/config';
 
 // MCP Tool definitions
@@ -99,6 +100,11 @@ async function executeToolCall(toolCall: ToolCall): Promise<ToolResult> {
           });
         });
         
+        // Log tool usage for monitoring
+        if (global.currentMonitor) {
+          global.currentMonitor.addToolUsage('search_philippines_energy');
+        }
+        
         return {
           content: {
             results: searchResults,
@@ -110,6 +116,12 @@ async function executeToolCall(toolCall: ToolCall): Promise<ToolResult> {
       case "query_qdrant_db":
         const { queryQdrant } = await import('../../packages/mcp-server-energy/src/services/qdrantService');
         const qdrantResults = await queryQdrant(toolCall.arguments.query);
+        
+        // Log tool usage for monitoring
+        if (global.currentMonitor) {
+          global.currentMonitor.addToolUsage('query_qdrant_db');
+        }
+        
         return {
           content: {
             results: qdrantResults,
@@ -142,6 +154,11 @@ async function executeToolCall(toolCall: ToolCall): Promise<ToolResult> {
           });
         }
         
+        // Log tool usage for monitoring
+        if (global.currentMonitor) {
+          global.currentMonitor.addToolUsage('query_supabase_db');
+        }
+        
         return {
           content: {
             results: supabaseData || [],
@@ -155,6 +172,11 @@ async function executeToolCall(toolCall: ToolCall): Promise<ToolResult> {
         
         // Store in Qdrant
         await storeSearchResults(data, topics);
+        
+        // Log tool usage for monitoring
+        if (global.currentMonitor) {
+          global.currentMonitor.addToolUsage('store_energy_data');
+        }
         
         // Store in Supabase cached_pages table
         const supabaseInserts = data.map((result: any) => ({
@@ -379,31 +401,35 @@ Format your response in a clear, conversational manner. If you have specific dat
 
 async function ensureCachedPagesTable() {
   try {
-    console.log('\n🔗 Testing Supabase connection...');
-    console.log('Supabase URL:', process.env.SUPABASE_URL ? 'Set' : 'Missing');
-    console.log('Supabase Key:', process.env.SUPABASE_KEY ? 'Set' : 'Missing');
-    
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from('cached_pages')
       .select('url')
       .limit(1);
     
-    if (error) {
-      console.error('❌ Supabase connection error:', error);
-      if (error.message.includes('relation "cached_pages" does not exist')) {
-        console.log('📝 Please create the cached_pages table in Supabase with columns: url (primary key), title, source, content, created_at');
-      }
-    } else {
-      console.log('✅ Supabase connection successful');
-      console.log('Current cached_pages count:', data?.length || 0);
+    if (error && error.message.includes('relation "cached_pages" does not exist')) {
+      console.log('Please create the cached_pages table in Supabase with columns: url (primary key), title, source, content, created_at');
     }
   } catch (error) {
-    console.error('❌ Error checking cached_pages table:', error);
+    console.error('Error checking cached_pages table:', error);
   }
 }
 
 app.get('/health', (req: Request, res: Response) => {
   res.send('OK');
+});
+
+app.get('/metrics', async (req: Request, res: Response) => {
+  try {
+    const { MonitoringService } = await import('../../packages/monitoring/monitoring');
+    const monitoring = new MonitoringService();
+    const metrics = await monitoring.getMetrics();
+    res.json(metrics || { error: 'Monitoring service unavailable' });
+  } catch (error) {
+    res.json({ 
+      error: 'Monitoring service not running',
+      message: 'Start monitoring server with: python packages/monitoring/server.py'
+    });
+  }
 });
 
 
@@ -417,14 +443,29 @@ app.post('/analyze', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Question is required' });
     }
 
-    console.log('\n🔍 Starting AI Agent Analysis for:', question);
-    console.log('🤖 Using MCP tools for comprehensive analysis...\n');
+    console.log(`🔍 Analyzing: ${question}`);
+
+    // Initialize monitoring for this request
+    const monitor = new AIAgentMonitor(question);
+    global.currentMonitor = monitor;
 
     // Reset sources for this analysis
     usedSources = [];
 
-    // Use AI agent with MCP tools to handle the entire workflow
-    const forecast = await callClaudeWithTools(question);
+    let forecast = '';
+    let error: string | undefined;
+
+    try {
+      // Use AI agent with MCP tools to handle the entire workflow
+      forecast = await callClaudeWithTools(question);
+    } catch (e) {
+      error = e instanceof Error ? e.message : 'Unknown error';
+      forecast = 'Analysis failed due to an error.';
+    }
+
+    // Finish monitoring trace
+    const contexts = usedSources.map(s => s.title);
+    await monitor.finishTrace(question, forecast, usedSources.length, error, contexts);
 
     const response = {
       question,
@@ -434,11 +475,14 @@ app.post('/analyze', async (req: Request, res: Response) => {
       }
     };
 
-    console.log('\n✨ AI Agent Analysis complete!');
+    console.log('✅ Analysis complete');
     res.json(response);
   } catch (error) {
     console.error('Error in AI agent analyze endpoint:', error);
     res.status(500).json({ error: 'Internal server error' });
+  } finally {
+    // Clean up global monitor reference
+    global.currentMonitor = undefined;
   }
 });
 
