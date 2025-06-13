@@ -59,11 +59,11 @@ const claudeTools = [
   },
   {
     name: "query_supabase_db",
-    description: "Query Supabase database for Philippines energy sources",
+    description: "Query Supabase cached_pages table for Philippines energy sources",
     input_schema: {
       type: "object", 
       properties: {
-        query: { type: "string", description: "Query to search in Supabase database" }
+        query: { type: "string", description: "Query to search in cached_pages table" }
       },
       required: ["query"]
     }
@@ -89,6 +89,16 @@ async function executeToolCall(toolCall: ToolCall): Promise<ToolResult> {
         const { searchEnergySites } = await import('../../packages/mcp-server-energy/src/services/searchService');
         const searchQuery = `${toolCall.arguments.query} Philippines energy`;
         const searchResults = await searchEnergySites(searchQuery);
+        
+        // Track scraped sources
+        searchResults.forEach(result => {
+          usedSources.push({
+            title: result.title,
+            url: result.url,
+            source: result.source
+          });
+        });
+        
         return {
           content: {
             results: searchResults,
@@ -109,13 +119,27 @@ async function executeToolCall(toolCall: ToolCall): Promise<ToolResult> {
 
       case "query_supabase_db":
         const { data: supabaseData, error } = await supabase
-          .from('energy_sources')
+          .from('cached_pages')
           .select('*')
           .or(`content.ilike.%${toolCall.arguments.query}%,content.ilike.%Philippines%,content.ilike.%Filipino%,content.ilike.%PH%`)
           .limit(10);
         
         if (error) {
           return { content: { error: error.message }, isError: true };
+        }
+        
+        // Track cached sources used
+        if (supabaseData) {
+          supabaseData.forEach(result => {
+            // Only add if not already in usedSources (to avoid duplicates)
+            if (!usedSources.find(s => s.url === result.url)) {
+              usedSources.push({
+                title: result.title,
+                url: result.url,
+                source: result.source
+              });
+            }
+          });
         }
         
         return {
@@ -132,28 +156,40 @@ async function executeToolCall(toolCall: ToolCall): Promise<ToolResult> {
         // Store in Qdrant
         await storeSearchResults(data, topics);
         
-        // Store in Supabase
+        // Store in Supabase cached_pages table
         const supabaseInserts = data.map((result: any) => ({
-          url: result.url,
+          url: result.url, // Primary key
           title: result.title,
-          content: result.content || result.snippet,
           source: result.source,
-          question_context: topics.join(', '),
-          scraped_at: new Date().toISOString()
+          content: result.content || result.snippet,
+          created_at: new Date().toISOString()
         }));
 
         const { error: insertError } = await supabase
-          .from('energy_sources')
-          .insert(supabaseInserts);
+          .from('cached_pages')
+          .insert(supabaseInserts)
+          .select();
         
         if (insertError) {
-          return { content: { error: insertError.message }, isError: true };
+          // Handle duplicate URL conflicts by using upsert instead
+          if (insertError.code === '23505') { // Unique constraint violation
+            const { error: upsertError } = await supabase
+              .from('cached_pages')
+              .upsert(supabaseInserts, { onConflict: 'url' })
+              .select();
+            
+            if (upsertError) {
+              return { content: { error: upsertError.message }, isError: true };
+            }
+          } else {
+            return { content: { error: insertError.message }, isError: true };
+          }
         }
         
         return {
           content: {
             stored_count: data.length,
-            message: "Successfully stored data in both Qdrant and Supabase"
+            message: "Successfully stored data in both Qdrant and cached_pages table"
           }
         };
 
@@ -177,10 +213,13 @@ async function callClaudeWithTools(question: string): Promise<string> {
 ${claudeTools.map(tool => `- ${tool.name}: ${tool.description}`).join('\n')}
 
 Your workflow should be:
-1. First, check existing data sources using query_qdrant_db and query_supabase_db
-2. If more information is needed, use search_philippines_energy to get fresh data
-3. Store any new valuable data using store_energy_data
-4. Provide comprehensive analysis with specific recommendations, forecasts, and insights
+1. First, check existing historical data using query_qdrant_db and query_supabase_db (cached_pages table)
+2. Always use search_philippines_energy to get fresh, current data and new sources
+3. Store any new valuable scraped data using store_energy_data in both Qdrant and cached_pages table
+4. Provide comprehensive analysis combining both historical cached data AND fresh scraped data
+5. Use historical data for trends and comparisons, fresh data for current market conditions
+
+Important: The cached_pages table has columns: url (primary key), title, source, content (website content), created_at. Always scrape for new sources even if cached data exists - cached data provides historical context while fresh data ensures current market insights.
 
 After gathering all necessary data, please provide your response in a conversational, expert manner. Include:
 
@@ -338,24 +377,38 @@ Format your response in a clear, conversational manner. If you have specific dat
   return textContent?.text || "Analysis completed but no final response generated.";
 }
 
-async function ensureEnergySourcesTable() {
+async function ensureCachedPagesTable() {
   try {
-    const { error } = await supabase
-      .from('energy_sources')
-      .select('id')
+    console.log('\n🔗 Testing Supabase connection...');
+    console.log('Supabase URL:', process.env.SUPABASE_URL ? 'Set' : 'Missing');
+    console.log('Supabase Key:', process.env.SUPABASE_KEY ? 'Set' : 'Missing');
+    
+    const { data, error } = await supabase
+      .from('cached_pages')
+      .select('url')
       .limit(1);
     
-    if (error && error.message.includes('relation "energy_sources" does not exist')) {
-      console.log('Please create the energy_sources table in Supabase with columns: id, url, title, content, source, question_context, scraped_at');
+    if (error) {
+      console.error('❌ Supabase connection error:', error);
+      if (error.message.includes('relation "cached_pages" does not exist')) {
+        console.log('📝 Please create the cached_pages table in Supabase with columns: url (primary key), title, source, content, created_at');
+      }
+    } else {
+      console.log('✅ Supabase connection successful');
+      console.log('Current cached_pages count:', data?.length || 0);
     }
   } catch (error) {
-    console.error('Error checking energy_sources table:', error);
+    console.error('❌ Error checking cached_pages table:', error);
   }
 }
 
 app.get('/health', (req: Request, res: Response) => {
   res.send('OK');
 });
+
+
+// Global variable to track sources used during analysis
+let usedSources: Array<{title: string, url: string, source: string}> = [];
 
 app.post('/analyze', async (req: Request, res: Response) => {
   try {
@@ -367,6 +420,9 @@ app.post('/analyze', async (req: Request, res: Response) => {
     console.log('\n🔍 Starting AI Agent Analysis for:', question);
     console.log('🤖 Using MCP tools for comprehensive analysis...\n');
 
+    // Reset sources for this analysis
+    usedSources = [];
+
     // Use AI agent with MCP tools to handle the entire workflow
     const forecast = await callClaudeWithTools(question);
 
@@ -374,7 +430,7 @@ app.post('/analyze', async (req: Request, res: Response) => {
       question,
       forecast,
       sources: {
-        message: "Sources dynamically determined by AI agent using MCP tools"
+        websites: usedSources
       }
     };
 
@@ -387,7 +443,7 @@ app.post('/analyze', async (req: Request, res: Response) => {
 });
 
 // Initialize database table
-ensureEnergySourcesTable();
+ensureCachedPagesTable();
 
 app.listen(port, () => {
   console.log(`Backend listening at http://localhost:${port}`);
