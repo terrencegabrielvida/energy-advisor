@@ -18,35 +18,38 @@ interface MCPSearchResult {
   };
 }
 
-async function searchMCP(question: string): Promise<MCPSearchResult> {
-  const response = await fetch("http://localhost:3000/analyze", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({ question }),
-  });
+async function searchMCP(question: string): Promise<MCPSearchResult | null> {
+  try {
+    const response = await fetch("http://localhost:3000/analyze", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ question }),
+    });
 
-  if (!response.ok) {
-    throw new Error(`MCP server error ${response.status}`);
+    if (!response.ok) {
+      console.log('MCP server not available, proceeding without context');
+      return null;
+    }
+
+    const data = await response.json() as MCPSearchResult;
+    return data;
+  } catch (error) {
+    console.log('MCP server not available, proceeding without context');
+    return null;
   }
-
-  const data = await response.json() as MCPSearchResult;
-  return data;
 }
 
 async function askClaude(question: string, context?: string): Promise<string> {
   let finalContext = context;
   
   if (!finalContext) {
-    try {
-      const searchResults = await searchMCP(question);
+    const searchResults = await searchMCP(question);
+    if (searchResults) {
       finalContext = searchResults.sources.websites
         .map((site: any) => `${site.title}\n${site.url}`)
         .join('\n\n');
-    } catch (error) {
-      console.error('Error searching MCP:', error);
-      finalContext = "No additional context available.";
     }
   }
 
@@ -63,12 +66,12 @@ async function askClaude(question: string, context?: string): Promise<string> {
       messages: [
         {
           role: "user",
-          content: `You are an energy sector expert AI assistant specializing in the Philippine energy market. Your task is to provide specific, data-driven insights and recommendations based on the following question and available data.
+          content: `You are an energy sector expert AI assistant specializing in the Philippine energy market. Your task is to provide specific, data-driven insights and recommendations based on the following question${finalContext ? ' and available data' : ''}.
 
       Question: ${question}
       
-      Context from websites and database:
-      ${finalContext}
+      ${finalContext ? `Context from websites and database:
+      ${finalContext}` : ''}
       
       Please provide your response in a conversational, expert manner. Include:
 
@@ -134,18 +137,23 @@ async function askClaude(question: string, context?: string): Promise<string> {
 
 async function runAgent() {
   const userInput = "I want to find the best location in Visayas for a 100MW lithium battery. Where should I be looking to buy land?";
+  
+  // Get vector for user input
   const vector = await embedText(userInput);
-
+  
+  // Search Qdrant with a higher similarity threshold
   const hits = await qdrant.search("energy-docs", {
     vector,
     limit: 5,
     with_payload: true,
+    score_threshold: 0.7  // Only include results with high similarity
   });
 
-  const context = hits
+  // Only use context if we have relevant results
+  const context = hits.length > 0 ? hits
     .map((h) => (typeof h.payload?.text === "string" ? h.payload.text : ""))
     .filter(Boolean)
-    .join("\n---\n");
+    .join("\n---\n") : '';
 
   const answer = await askClaude(userInput, context);
   console.log("\n🔹 User Input:\n", userInput);

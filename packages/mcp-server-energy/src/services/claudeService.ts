@@ -47,17 +47,22 @@ export async function analyzeWithClaude(input: AnalysisInput): Promise<string> {
     }
 
     if (input.qdrantResults && input.qdrantResults.length > 0) {
-      qdrantContext = input.qdrantResults
-        .map(result => `
-          Historical Data:
-          ${result.content}
-          Source: ${result.source}
-          Topics: ${result.topics.join(', ')}
-        `)
-        .join('\n\n');
+      // Only include Qdrant results with high similarity score
+      const relevantResults = input.qdrantResults.filter(result => result.score >= 0.7);
+      
+      if (relevantResults.length > 0) {
+        qdrantContext = relevantResults
+          .map(result => `
+            Historical Data:
+            ${result.content}
+            Source: ${result.source}
+            Topics: ${result.topics.join(', ')}
+          `)
+          .join('\n\n');
+      }
     }
 
-    const context = `${websiteContext}\n\nHistorical Context and Additional Data:\n${qdrantContext}`;
+    const context = `${websiteContext}${qdrantContext ? `\n\nHistorical Context and Additional Data:\n${qdrantContext}` : ''}`;
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
