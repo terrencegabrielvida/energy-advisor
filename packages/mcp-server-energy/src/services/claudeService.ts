@@ -62,8 +62,12 @@ export async function analyzeWithClaude(input: AnalysisInput): Promise<string> {
       }
     }
 
-    const context = `${websiteContext}${qdrantContext ? `\n\nHistorical Context and Additional Data:\n${qdrantContext}` : ''}`;
-
+    let context = '';
+    if (websiteContext || qdrantContext ) {
+      context = `${websiteContext}${qdrantContext ? `\n\nHistorical Context and Additional Data:\n${qdrantContext}` : ''}`
+    } else {
+      context = 'No context provided'; 
+    }
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -80,8 +84,6 @@ export async function analyzeWithClaude(input: AnalysisInput): Promise<string> {
             content: `You are an energy sector expert AI assistant specializing in the Philippine energy market. Your task is to provide specific, data-driven insights and recommendations based on the following question and available data.
 
       Question: ${input.question}
-      
-      Context from websites and database:
       ${context}
       
       Please provide your response in a conversational, expert manner. Include:
